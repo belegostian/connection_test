@@ -19,16 +19,17 @@ public:
     // Start listening for connections and handle incoming data
     void run();
 
-    // receive chunk of file, save it, than return successful status
-    void saveFileAndSendResponse(SOCKET clientSocket);
-
-private:
     // IP address of the server
     std::string ip_;
     // Port number of the server
     int port_;
     // Listening socket for incoming connections
     SOCKET listenSocket_;
+
+    // Helper methods
+    void acceptClientAndProcess();
+    void saveFileAndSendResponse(SOCKET clientSocket);
+    void closeAndCleanUp(SOCKET clientSocket);
 };
 
 int main()
@@ -109,35 +110,36 @@ void TCPServer::run()
 
     while (true)
     {
-        // Accept a client connection
-        sockaddr_in clientAddress;
-        int clientAddressSize = sizeof(clientAddress);
-        SOCKET clientSocket = accept(listenSocket_, (SOCKADDR *)&clientAddress, &clientAddressSize);
-
-        if (clientSocket == INVALID_SOCKET)
-        {
-            std::cerr << "Error accepting connection: " << WSAGetLastError() << std::endl;
-            continue;
-        }
-
-        std::cout << "Client connected!" << std::endl;
-
-        // Save the received file and send a response
-        saveFileAndSendResponse(clientSocket);
-
-        // Close the client socket
-        closesocket(clientSocket);
+        acceptClientAndProcess();
     }
 
-    // Close the listening socket and clean up
-    closesocket(listenSocket_);
-    WSACleanup();
+    closeAndCleanUp(listenSocket_);
+}
+
+void TCPServer::acceptClientAndProcess()
+{
+    // Accept a client connection
+    sockaddr_in clientAddress;
+    int clientAddressSize = sizeof(clientAddress);
+    SOCKET clientSocket = accept(listenSocket_, (SOCKADDR *)&clientAddress, &clientAddressSize);
+    if (clientSocket == INVALID_SOCKET)
+    {
+        std::cerr << "Error accepting connection: " << WSAGetLastError() << std::endl;
+        return;
+    }
+
+    std::cout << "Client connected!" << std::endl;
+
+    // Save the received file and send a response
+    saveFileAndSendResponse(clientSocket);
+
+    // Close the client socket
+    closeAndCleanUp(clientSocket);
 }
 
 void TCPServer::saveFileAndSendResponse(SOCKET clientSocket)
 {
     static size_t version = 0;
-
     std::string folderPath = "C:/Users/Ian/Desktop/backup/";
     std::string fileName = "backup_" + std::to_string(++version) + ".nc";
     std::ofstream outputFile(folderPath + fileName, std::ios::binary);
@@ -187,4 +189,10 @@ void TCPServer::saveFileAndSendResponse(SOCKET clientSocket)
     // Send a response to the client
     std::string response = "File received";
     send(clientSocket, response.data(), response.size(), 0);
+}
+
+void TCPServer::closeAndCleanUp(SOCKET socket)
+{
+    closesocket(socket);
+    WSACleanup();
 }
