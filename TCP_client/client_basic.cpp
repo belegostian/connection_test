@@ -111,34 +111,60 @@ void TCPClient::sendFile(const std::string &filePath)
         return;
     }
 
-    const size_t bufferSize = 1024;
-    char buffer[bufferSize];
-    int bytesRead;
+    const size_t bufferSize = 4096;
+    std::vector<char> buffer(bufferSize);
+    std::streamsize bytesRead;
 
-    for (size_t i = 0; i < 1000; i++)
-    {
-        auto start = std::chrono::steady_clock::now();
-        while (file.read(buffer, bufferSize) || (bytesRead = file.gcount()))
-        {            
-            int bytesSent = send(connectSocket, buffer, bytesRead, 0);
+    auto sendAll = [&](const char* data, size_t len) {
+        int totalSent = 0;
+        while (totalSent < len)
+        {
+            int bytesSent = send(connectSocket, data + totalSent, len - totalSent, 0);
             if (bytesSent == SOCKET_ERROR)
+            {
+                return SOCKET_ERROR;
+            }
+            totalSent += bytesSent;
+        }
+        return totalSent;
+    };
+
+    // Calculate file size
+    file.seekg(0, std::ios::end);
+    int64_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    for (size_t i = 0; i < 1; i++)
+    {
+        // Send file size before sending file data
+        if (sendAll(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)) == SOCKET_ERROR)
+        {
+            std::cerr << "Error sending file size: " << WSAGetLastError() << std::endl;
+            break;
+        }
+
+        file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning
+        auto start = std::chrono::steady_clock::now();
+        while ((bytesRead = file.readsome(buffer.data(), bufferSize)) > 0)
+        {            
+            if (sendAll(buffer.data(), bytesRead) == SOCKET_ERROR)
             {
                 std::cerr << "Error sending data: " << WSAGetLastError() << std::endl;
                 break;
             }
         }
 
-        file.close();
+        file.clear(); // Clear EOF flag
 
-        char response[1024];
-        int responseSize = recv(connectSocket, response, sizeof(response), 0);
+        std::vector<char> response(1024);
+        int responseSize = recv(connectSocket, response.data(), response.size(), 0);
         if (responseSize > 0)
         {
             auto end = std::chrono::steady_clock::now();
             std::chrono::duration<double> elapsed = end - start;
             rtts.push_back(elapsed.count());
 
-            std::string serverResponse(response, responseSize);
+            std::string serverResponse(response.data(), responseSize);
             std::cout << serverResponse << std::endl;
         }
         else
@@ -147,6 +173,8 @@ void TCPClient::sendFile(const std::string &filePath)
             break;
         }
     }
+    
+    file.close(); // Close the file after the loop is finished
 
     // Evaluate QoS
     evaluateQoS(rtts);

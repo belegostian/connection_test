@@ -1,6 +1,7 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <vector>
 #include <fstream>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -17,8 +18,8 @@ public:
 
     // Start listening for connections and handle incoming data
     void run();
-    
-    //receive chunk of file, save it, than return successful status
+
+    // receive chunk of file, save it, than return successful status
     void saveFileAndSendResponse(SOCKET clientSocket);
 
 private:
@@ -136,36 +137,51 @@ void TCPServer::saveFileAndSendResponse(SOCKET clientSocket)
 
     std::string folderPath = "C:/Users/Ian/Desktop/backup/";
     std::string fileName = "backup_" + std::to_string(++version) + ".nc";
-    std::ofstream file(folderPath + fileName, std::ios::binary);
+    std::ofstream outputFile(folderPath + fileName, std::ios::binary);
 
-    if (!file)
+    if (!outputFile)
     {
         std::cerr << "Error opening file: " << folderPath + fileName << std::endl;
         return;
     }
 
-    const size_t bufferSize = 1024;
-    char buffer[bufferSize];
-    int bytesReceived;
+    const size_t bufferSize = 4096;
+    std::vector<char> buffer(bufferSize);
+    int64_t fileSize;
 
-    while ((bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0)
+    // Read file size
+    int received = recv(clientSocket, reinterpret_cast<char *>(&fileSize), sizeof(fileSize), 0);
+    if (received != sizeof(fileSize))
     {
-        file.write(buffer, bytesReceived);
+        std::cerr << "Error receiving file size" << std::endl;
+        return;
     }
 
-    file.close();
+    int64_t bytesReceived = 0;
 
-    if (bytesReceived == 0)
+    while (bytesReceived < fileSize)
     {
-        std::string message = "Version " + std::to_string(version) + " Backup Complete!";
-        int bytesSent = send(clientSocket, message.c_str(), message.size(), 0);
-        if (bytesSent == SOCKET_ERROR)
+        int bytesRead = recv(clientSocket, buffer.data(), bufferSize, 0);
+        if (bytesRead > 0)
         {
-            std::cerr << "Error sending response to client: " << WSAGetLastError() << std::endl;
+            outputFile.write(buffer.data(), bytesRead);
+            bytesReceived += bytesRead;
+        }
+        else if (bytesRead == 0)
+        {
+            std::cerr << "Client disconnected" << std::endl;
+            break;
+        }
+        else
+        {
+            std::cerr << "Error receiving file data: " << WSAGetLastError() << std::endl;
+            break;
         }
     }
-    else
-    {
-        std::cerr << "Error receiving file from client: " << WSAGetLastError() << std::endl;
-    }
+
+    outputFile.close();
+
+    // Send a response to the client
+    std::string response = "File received";
+    send(clientSocket, response.data(), response.size(), 0);
 }
