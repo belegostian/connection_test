@@ -4,6 +4,8 @@
 #include <ws2tcpip.h>
 #include <chrono>
 #include <vector>
+#include <thread>
+#include <csignal>
 #include <cmath>
 #include <fstream>
 
@@ -51,8 +53,19 @@ private:
     WSADATA wsaData;
 };
 
+
+// Signal handler
+volatile sig_atomic_t interrupted = false;
+void signalHandler(int signum)
+{
+    interrupted = true;
+}
+
 int main()
 {
+    // Set up signal handler
+    std::signal(SIGINT, signalHandler);
+
     // Create a TCPClient instance with IP address and port number
     TCPClient client("127.0.0.1", 12345);
 
@@ -61,7 +74,14 @@ int main()
     {
         // Send file to server and wait for response
         std::string filePath = "C:/Users/Ian/Desktop/5axis_cut.nc";
-        client.sendFile(filePath);
+
+        while (!interrupted)
+        {
+            client.sendFile(filePath);
+
+            // Wait for 30 seconds before sending the file again
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+        }        
 
         // Close the connection
         client.closeConnection();

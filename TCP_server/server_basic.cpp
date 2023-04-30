@@ -107,27 +107,30 @@ void TCPServer::run()
 
     std::cout << "Server is listening for connections..." << std::endl;
 
-    // Accept a client connection
-    sockaddr_in clientAddress;
-    int clientAddressSize = sizeof(clientAddress);
-    SOCKET clientSocket = accept(listenSocket_, (SOCKADDR *)&clientAddress, &clientAddressSize);
-    if (clientSocket == INVALID_SOCKET)
+    while (true)
     {
-        std::cerr << "Error accepting connection: " << WSAGetLastError() << std::endl;
-        closesocket(listenSocket_);
-        WSACleanup();
-        return;
+        // Accept a client connection
+        sockaddr_in clientAddress;
+        int clientAddressSize = sizeof(clientAddress);
+        SOCKET clientSocket = accept(listenSocket_, (SOCKADDR *)&clientAddress, &clientAddressSize);
+
+        if (clientSocket == INVALID_SOCKET)
+        {
+            std::cerr << "Error accepting connection: " << WSAGetLastError() << std::endl;
+            continue;
+        }
+
+        std::cout << "Client connected!" << std::endl;
+
+        // Save the received file and send a response
+        saveFileAndSendResponse(clientSocket);
+
+        // Close the client socket
+        closesocket(clientSocket);
     }
 
-    std::cout << "Client connected!" << std::endl;
-    // Close the listening socket
+    // Close the listening socket and clean up
     closesocket(listenSocket_);
-
-    // Save the received file and send a response
-    saveFileAndSendResponse(clientSocket);
-
-    // Close the client and listening sockets and clean up
-    closesocket(clientSocket);
     WSACleanup();
 }
 
