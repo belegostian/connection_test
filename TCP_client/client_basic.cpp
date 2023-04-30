@@ -2,10 +2,10 @@
 #include <string>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-
 #include <chrono>
 #include <vector>
 #include <cmath>
+#include <fstream>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -35,8 +35,8 @@ public:
     // Establishes a connection to the server
     bool connectToServer();
 
-    // Sends and receives messages with the server
-    void sendAndReceiveMessages(size_t messageCount, size_t messageSize);
+    // Sends .nc file to server and  waits for response
+    void sendFile(const std::string &filePath);
 
     // Closes the connection
     void closeConnection();
@@ -59,8 +59,9 @@ int main()
     // Connect to the server
     if (client.connectToServer())
     {
-        // Send and receive messages
-        client.sendAndReceiveMessages(1000, 1024);
+        // Send file to server and wait for response
+        std::string filePath = "C:/Users/Ian/Desktop/5axis_cut.nc";
+        client.sendFile(filePath);
 
         // Close the connection
         client.closeConnection();
@@ -100,33 +101,49 @@ bool TCPClient::connectToServer()
     return true;
 }
 
-// Sends and receives messages with the server, and evaluates QoS metrics
-void TCPClient::sendAndReceiveMessages(size_t messageCount, size_t messageSize)
+void TCPClient::sendFile(const std::string &filePath)
 {
     std::vector<double> rtts;
-    char buffer[1024];
-    std::string message(messageSize, 'hello, there');
+    std::ifstream file(filePath, std::ios::binary);
+    if (!file)
+    {
+        std::cerr << "Error opening file: " << filePath << std::endl;
+        return;
+    }
 
-    // Send and receive data
-    for (size_t i = 0; i < messageCount; ++i)
+    const size_t bufferSize = 1024;
+    char buffer[bufferSize];
+    int bytesRead;
+
+    for (size_t i = 0; i < 1000; i++)
     {
         auto start = std::chrono::steady_clock::now();
-        int result = send(connectSocket, message.c_str(), message.size(), 0);
-        if (result == SOCKET_ERROR)
-        {
-            std::cerr << "Error sending data: " << WSAGetLastError() << std::endl;
-            break;
+        while (file.read(buffer, bufferSize) || (bytesRead = file.gcount()))
+        {            
+            int bytesSent = send(connectSocket, buffer, bytesRead, 0);
+            if (bytesSent == SOCKET_ERROR)
+            {
+                std::cerr << "Error sending data: " << WSAGetLastError() << std::endl;
+                break;
+            }
         }
-        result = recv(connectSocket, buffer, sizeof(buffer), 0);
-        if (result > 0)
+
+        file.close();
+
+        char response[1024];
+        int responseSize = recv(connectSocket, response, sizeof(response), 0);
+        if (responseSize > 0)
         {
             auto end = std::chrono::steady_clock::now();
             std::chrono::duration<double> elapsed = end - start;
             rtts.push_back(elapsed.count());
+
+            std::string serverResponse(response, responseSize);
+            std::cout << serverResponse << std::endl;
         }
         else
         {
-            std::cerr << "Error receiving data: " << WSAGetLastError() << std::endl;
+            std::cerr << "Error receiving response from server: " << WSAGetLastError() << std::endl;
             break;
         }
     }
