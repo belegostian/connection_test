@@ -6,7 +6,6 @@
 #include <vector>
 #include <thread>
 #include <csignal>
-#include <cmath>
 #include <fstream>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -16,23 +15,10 @@ class TCPClient
 {
 public:
     // Constructor: Takes IP address and port as parameters
-    TCPClient(const std::string &ipAddress, unsigned short port)
-        : ipAddress(ipAddress), port(port), connectSocket(INVALID_SOCKET)
-    {
-        // Initialize Winsock
-        int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-        if (result != 0)
-        {
-            std::cerr << "WSAStartup failed: " << result << std::endl;
-            std::exit(1);
-        }
-    }
+    TCPClient(const std::string &ipAddress, unsigned short port);
 
     // Destructor: Cleans up Winsock resources
-    ~TCPClient()
-    {
-        WSACleanup();
-    }
+    ~TCPClient();
 
     // Establishes a connection to the server
     bool connectToServer();
@@ -43,9 +29,6 @@ public:
     // Closes the connection
     void closeConnection();
 
-    // Evaluates Quality of Service (QoS) metrics
-    void evaluateQoS(const std::vector<double> &rtts);
-
 private:
     std::string ipAddress;
     unsigned short port;
@@ -53,8 +36,7 @@ private:
     WSADATA wsaData;
 };
 
-
-// Signal handler
+// Signal handler to catch interrupt signals
 volatile sig_atomic_t interrupted = false;
 void signalHandler(int signum)
 {
@@ -68,26 +50,48 @@ int main()
 
     // Create a TCPClient instance with IP address and port number
     TCPClient client("127.0.0.1", 12345);
+    std::string filePath = "C:/Users/Ian/Desktop/5axis_cut.nc";
 
-    // Connect to the server
-    if (client.connectToServer())
-    {
-        // Send file to server and wait for response
-        std::string filePath = "C:/Users/Ian/Desktop/5axis_cut.nc";
-
-        while (!interrupted)
+    // Continuously send file until interrupted
+    while (!interrupted)
+    {   
+        // Connect to the server
+        if (client.connectToServer())
         {
+            // Send file to server and wait for response
             client.sendFile(filePath);
 
-            // Wait for 30 seconds before sending the file again
-            std::this_thread::sleep_for(std::chrono::seconds(30));
-        }        
+            // Close the connection
+            client.closeConnection();
+        }
 
-        // Close the connection
-        client.closeConnection();
-    }
+        std::cout << "Press Enter to send the file again or Ctrl+C to exit." << std::endl;
+
+        // Wait for Enter key press
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }    
 
     return 0;
+}
+
+
+// Constructor implementation
+TCPClient::TCPClient(const std::string &ipAddress, unsigned short port)
+    : ipAddress(ipAddress), port(port), connectSocket(INVALID_SOCKET)
+{
+    // Initialize Winsock
+    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (result != 0)
+    {
+        std::cerr << "WSAStartup failed: " << result << std::endl;
+        std::exit(1);
+    }
+}
+
+// Destructor implementation
+TCPClient::~TCPClient()
+{
+    WSACleanup();
 }
 
 // Connects to the server with the specified IP address and port number
@@ -121,9 +125,9 @@ bool TCPClient::connectToServer()
     return true;
 }
 
+// Sends the file to the server
 void TCPClient::sendFile(const std::string &filePath)
 {
-    std::vector<double> rtts;
     std::ifstream file(filePath, std::ios::binary);
     if (!file)
     {
@@ -135,7 +139,8 @@ void TCPClient::sendFile(const std::string &filePath)
     std::vector<char> buffer(bufferSize);
     std::streamsize bytesRead;
 
-    auto sendAll = [&](const char* data, size_t len) {
+    auto sendAll = [&](const char *data, size_t len)
+    {
         int totalSent = 0;
         while (totalSent < len)
         {
@@ -157,16 +162,17 @@ void TCPClient::sendFile(const std::string &filePath)
     for (size_t i = 0; i < 1; i++)
     {
         // Send file size before sending file data
-        if (sendAll(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)) == SOCKET_ERROR)
+        if (sendAll(reinterpret_cast<const char *>(&fileSize), sizeof(fileSize)) == SOCKET_ERROR)
         {
             std::cerr << "Error sending file size: " << WSAGetLastError() << std::endl;
             break;
         }
 
-        file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning
-        auto start = std::chrono::steady_clock::now();
+        // Reset the file pointer to the beginning
+        file.seekg(0, std::ios::beg);
+
         while ((bytesRead = file.readsome(buffer.data(), bufferSize)) > 0)
-        {            
+        {
             if (sendAll(buffer.data(), bytesRead) == SOCKET_ERROR)
             {
                 std::cerr << "Error sending data: " << WSAGetLastError() << std::endl;
@@ -174,16 +180,13 @@ void TCPClient::sendFile(const std::string &filePath)
             }
         }
 
-        file.clear(); // Clear EOF flag
+        // Clear EOF flag
+        file.clear();
 
         std::vector<char> response(1024);
         int responseSize = recv(connectSocket, response.data(), response.size(), 0);
         if (responseSize > 0)
         {
-            auto end = std::chrono::steady_clock::now();
-            std::chrono::duration<double> elapsed = end - start;
-            rtts.push_back(elapsed.count());
-
             std::string serverResponse(response.data(), responseSize);
             std::cout << serverResponse << std::endl;
         }
@@ -193,51 +196,12 @@ void TCPClient::sendFile(const std::string &filePath)
             break;
         }
     }
-    
-    file.close(); // Close the file after the loop is finished
 
-    // Evaluate QoS
-    evaluateQoS(rtts);
+    file.close(); // Close the file after the loop is finished
 }
 
 // Closes the connection by closing the socket
 void TCPClient::closeConnection()
 {
     closesocket(connectSocket);
-}
-
-// Evaluates QoS metrics based on recorded round-trip times (RTTs)
-void TCPClient::evaluateQoS(const std::vector<double> &rtts)
-{
-    if (rtts.empty())
-    {
-        std::cerr << "No round trip times recorded." << std::endl;
-        return;
-    }
-    double sum = 0;
-    double sq_sum = 0;
-    size_t received = rtts.size();
-
-    // Calculate sum and squared sum of RTTs
-    for (const auto &rtt : rtts)
-    {
-        sum += rtt;
-        sq_sum += rtt * rtt;
-    }
-
-    // Calculate mean, variance, and standard deviation of RTTs
-    double mean = sum / received;
-    double variance = (sq_sum / received) - (mean * mean);
-    double stddev = std::sqrt(variance);
-
-    // Calculate packet loss rate and total time spent
-    double packetLossRate = 1.0 - (static_cast<double>(received) / 1000);
-    double totalTime = sum;
-
-    // Display QoS metrics
-    std::cout << "QoS Metrics:\n";
-    std::cout << "1. Average Round Trip Time: " << mean << " seconds\n";
-    std::cout << "2. Standard Deviation of Round Trip Time: " << stddev << " seconds\n";
-    std::cout << "3. Packet Loss Rate: " << packetLossRate * 100 << "%\n";
-    std::cout << "4. Total Time Spent: " << totalTime << " seconds\n";
 }
